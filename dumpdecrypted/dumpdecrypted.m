@@ -19,16 +19,35 @@
 #include <Foundation/Foundation.h>
 
 #define swap32(value) (((value & 0xFF000000) >> 24) | ((value & 0x00FF0000) >> 8) | ((value & 0x0000FF00) << 8) | ((value & 0x000000FF) << 24) )
-
-void dumptofile(const char *path, const struct mach_header *mh){
+/*
+[+] Dumping BeautyEngine
+2018-07-03 22:14:17.705 Beauty[1503:48841] [+] detected 64bit ARM binary in memory.
+2018-07-03 22:14:17.706 Beauty[1503:48841] [+] offset to cryptid found: @0x101aa09f0(from 0x101aa0000) = 9f0
+2018-07-03 22:14:17.706 Beauty[1503:48841] [+] Found encrypted data at address 00004000 of length 3866624 bytes - type 1.
+2018-07-03 22:14:17.706 Beauty[1503:48841] [+] Opening /private/var/containers/Bundle/Application/04438933-D84F-4594-A705-3F79CD91B47E/Beauty.app/Frameworks/BeautyEngine.framework/BeautyEngine for reading.
+2018-07-03 22:14:17.706 Beauty[1503:48841] [+] Reading header
+2018-07-03 22:14:17.707 Beauty[1503:48841] [+] Detecting header type
+2018-07-03 22:14:17.707 Beauty[1503:48841] [+] Executable is a plain MACH-O image
+2018-07-03 22:14:17.707 Beauty[1503:48841] [+] Opening /var/mobile/Documents/BeautyEngine.decrypted for writing.
+2018-07-03 22:14:17.708 Beauty[1503:48841] [+] out path=/var/mobile/Documents/BeautyEngine.decrypted
+2018-07-03 22:14:17.708 Beauty[1503:48841] [+] Copying the not encrypted start of the file
+2018-07-03 22:14:17.708 Beauty[1503:48841] [+] Dumping the decrypted data into the file
+2018-07-03 22:14:17.711 Beauty[1503:48841] [+] Copying the not encrypted remainder of the file
+2018-07-03 22:14:17.721 Beauty[1503:48841] [+] Setting the LC_ENCRYPTION_INFO->cryptid to 0 at offset 9f0
+2018-07-03 22:14:17.722 Beauty[1503:48841] [+] Closing original file
+2018-07-03 22:14:17.722 Beauty[1503:48841] [+] Closing dump file
+ */
+static void dumptofile(const char *path, const struct mach_header *mh) {
     struct load_command *lc;
     struct encryption_info_command *eic;
     struct fat_header *fh;
     struct fat_arch *arch;
     char buffer[1024];
     char rpath[4096],npath[4096]; /* should be big enough for PATH_MAX */
-    unsigned int fileoffs = 0, off_cryptid = 0, restsize;
-    int i,fd,outfd,r,n,toread;
+    off_t off_cryptid = 0, restsize;// off_t=long long
+    unsigned int fileoffs = 0;
+    ssize_t toread,r,n;
+    int i,fd,outfd;
     char *tmp;
     
     if (realpath(path, rpath) == NULL) {
@@ -67,7 +86,7 @@ void dumptofile(const char *path, const struct mach_header *mh){
             }
             off_cryptid=(off_t)((void*)&eic->cryptid - (void*)mh);
             
-            NSLog(@"[+] offset to cryptid found: @%p(from %p) = %x\n", &eic->cryptid, mh, off_cryptid);
+            NSLog(@"[+] offset to cryptid found: @%p(from %p) = %llx\n", &eic->cryptid, mh, off_cryptid);
             
             NSLog(@"[+] Found encrypted data at address %08x of length %u bytes - type %u.\n", eic->cryptoff, eic->cryptsize, eic->cryptid);
             
@@ -81,7 +100,7 @@ void dumptofile(const char *path, const struct mach_header *mh){
             NSLog(@"[+] Reading header\n");
             n = read(fd, (void *)buffer, sizeof(buffer));
             if (n != sizeof(buffer)) {
-                NSLog(@"[W] Warning read only %d bytes\n", n);
+                NSLog(@"[W] Warning read only %zu bytes\n", n);
             }
             
             NSLog(@"[+] Detecting header type\n");
@@ -144,6 +163,7 @@ void dumptofile(const char *path, const struct mach_header *mh){
                     return;
                 }
             }
+            NSLog(@"[+] out path=%s\n", npath);
             
             /* calculate address of beginning of crypted data */
             n = fileoffs + eic->cryptoff;
@@ -200,7 +220,7 @@ void dumptofile(const char *path, const struct mach_header *mh){
             if (off_cryptid) {
                 uint32_t zero=0;
                 off_cryptid+=fileoffs;
-                NSLog(@"[+] Setting the LC_ENCRYPTION_INFO->cryptid to 0 at offset %x\n", off_cryptid);
+                NSLog(@"[+] Setting the LC_ENCRYPTION_INFO->cryptid to 0 at offset %llx\n", off_cryptid);
                 if (lseek(outfd, off_cryptid, SEEK_SET) != off_cryptid || write(outfd, &zero, 4) != 4) {
                     NSLog(@"[-] Error writing cryptid value\n");
                 }
@@ -223,7 +243,9 @@ void dumptofile(const char *path, const struct mach_header *mh){
 static void image_added(const struct mach_header *mh, intptr_t slide) {
     Dl_info image_info;
     int result = dladdr(mh, &image_info);
+    printf("[+] dumptofile start:(%s) %i\n", image_info.dli_fname != NULL ? image_info.dli_fname : "", result);
     dumptofile(image_info.dli_fname, mh);
+    printf("[+] dumptofile end:(%s)\n", image_info.dli_fname != NULL ? image_info.dli_fname : "");
 }
 
 __attribute__((constructor))
